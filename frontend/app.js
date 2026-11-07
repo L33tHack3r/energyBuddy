@@ -8,7 +8,6 @@ const state = {
   recommendations: [],
   market: null,
   quality: null,
-  summary: null,
   dailyNote: null,
   dailyMode: "balanced",
 };
@@ -41,13 +40,12 @@ function showToast(message) {
 }
 
 async function loadData() {
-  const [usage, appliances, recommendations, market, quality, weekly, dailyNote] = await Promise.all([
+  const [usage, appliances, recommendations, market, quality, dailyNote] = await Promise.all([
     api(`/api/flats/${state.flatId}/usage?days=7`),
     api(`/api/flats/${state.flatId}/appliances`),
     api(`/api/flats/${state.flatId}/recommendations?mode=${state.mode}`),
     api(`/api/market/tomorrow?flat_id=${state.flatId}&mode=${state.mode}`),
     api("/api/data-quality"),
-    api(`/api/flats/${state.flatId}/weekly-summary?mode=${state.mode}`),
     api(`/api/flats/${state.flatId}/daily-note?mode=${state.dailyMode}`),
   ]);
   state.usage = usage;
@@ -55,7 +53,6 @@ async function loadData() {
   state.recommendations = recommendations.recommendations;
   state.market = market;
   state.quality = quality;
-  state.summary = weekly;
   state.dailyNote = dailyNote;
   $("#action-count").textContent = String(state.recommendations.length);
   render();
@@ -70,9 +67,8 @@ function setPage(page) {
     circuits: ["Get to know your circuits.", "Usage patterns suggest a likely appliance — you’re always in control of the label."],
     quality: ["Trust starts with good data.", "Every incoming record is cleaned and classified before it reaches your analytics."],
     daily: ["A useful nudge for tomorrow.", "A quick, data-backed timing suggestion from this flat’s usage patterns and next-day forecast."],
-    weekly: ["Your week, made actionable.", "A preview of the same generated summary a future email provider could deliver."],
   }[page];
-  $("#breadcrumb-current").textContent = page === "weekly" ? "Weekly note" : page === "daily" ? "Daily nudge" : page === "quality" ? "Data quality" : page === "circuits" ? "Circuits" : page === "actions" ? "Your actions" : "Overview";
+  $("#breadcrumb-current").textContent = page === "daily" ? "Daily nudge" : page === "quality" ? "Data quality" : page === "circuits" ? "Circuits" : page === "actions" ? "Your actions" : "Overview";
   $("#page-title").textContent = title[0];
   $("#page-description").textContent = title[1];
   render();
@@ -185,7 +181,7 @@ function renderOverview() {
         <div class="usage-chart-wrap">${chartSvg(state.usage.series)}</div>
         <div class="chart-note">Occupancy is a synthetic signal. <strong>${number(metrics.unoccupied_kwh, 2)} kWh</strong> coincided with an empty flat.</div>
       </article>
-      <article class="card actions-card"><div class="section-header"><div><h2>Worth a look</h2><p>Your strongest opportunities this week</p></div><button class="text-button" data-go="actions">See all →</button></div>
+      <article class="card actions-card"><div class="section-header"><div><h2>Worth a look</h2><p>Your strongest opportunities</p></div><button class="text-button" data-go="actions">See all →</button></div>
         ${overviewRecommendations.length ? overviewRecommendations.map(miniAction).join("") : `<div class="empty-state">No strong opportunities found this week.</div>`}
       </article>
     </div>
@@ -194,10 +190,7 @@ function renderOverview() {
       <div class="detailed-chart-body overview-market-chart">${renderDetailedMarket()}</div>
       ${state.market.is_historical_scenario ? `<p class="detail-source-note">Historical data ends before today; this is a modeled scenario, not a live forecast.</p>` : ""}
     </article>
-    <div class="grid bottom-grid">
-      <article class="card quality-mini"><div class="mini-head"><div><h2>Data you can trust</h2><p>Cleaned through the real ingestion pipeline</p></div><div class="trust-number">${number(state.quality.trustworthy_percent, 1)}%</div></div><div class="quality-track"><span style="width:${state.quality.trustworthy_percent}%"></span></div><div class="quality-labels"><span><strong>${state.quality.raw_readings.toLocaleString()}</strong> raw records</span><span><strong>${state.quality.repaired.toLocaleString()}</strong> repaired</span><span><strong>${state.quality.rejected.toLocaleString()}</strong> rejected</span></div></article>
-      <article class="card summary-mini"><div class="mini-head"><div><h2>Your weekly note</h2><p>A useful recap, ready for your inbox</p></div><button class="text-button" data-go="weekly">Preview →</button></div><div class="summary-row"><div class="summary-icon">✳</div><p><strong>${state.summary.summary.top_actions.length} practical actions</strong> in your personal weekly recap, based on your real energy data.</p></div></article>
-    </div>`;
+    <article class="card quality-mini page-section"><div class="mini-head"><div><h2>Data quality</h2><p>Readings cleaned through the ingestion pipeline</p></div><div class="trust-number">${number(state.quality.trustworthy_percent, 1)}%</div></div><div class="quality-track"><span style="width:${state.quality.trustworthy_percent}%"></span></div><div class="quality-labels"><span><strong>${state.quality.raw_readings.toLocaleString()}</strong> raw records</span><span><strong>${state.quality.repaired.toLocaleString()}</strong> repaired</span><span><strong>${state.quality.rejected.toLocaleString()}</strong> rejected</span></div></article>`;
 }
 
 function renderActions() {
@@ -205,7 +198,7 @@ function renderActions() {
   return grouped.map((type) => {
     const list = state.recommendations.filter((item) => item.type === type);
     return `<section class="page-section"><div class="section-header"><div><h2>${type === "reduce" ? "Reduce · use less" : "Shift · use it at a better time"}</h2><p>${type === "reduce" ? "Potential consumption to avoid. Estimates include an explicit 50% avoidability assumption." : "Move a flexible load to a better hour. Shifting does not reduce kWh."}</p></div><span class="tag ${type === "shift" ? "shift-tag" : ""}">${list.length} ${list.length === 1 ? "action" : "actions"}</span></div>
-      <div class="grid two-col">${list.length ? list.map((item) => `<article class="card recommendation-card"><div class="action-symbol ${type === "shift" ? "shift" : ""}">${type === "reduce" ? "↓" : "↗"}</div><div class="recommendation-body"><span class="tag ${type === "shift" ? "shift-tag" : ""}">${type}</span><h3>${esc(item.title)}</h3><p>${esc(item.explanation)}</p><div class="impact-row">${type === "reduce" ? `<span><strong>${number(item.estimated_kwh_change, 2)}</strong> kWh avoided*</span>` : `<span><strong>0</strong> kWh change</span>`}<span><strong>${item.estimated_sek_change >= 0 ? "−" : "+"}${number(Math.abs(item.estimated_sek_change), 2)}</strong> SEK</span><span><strong>${item.estimated_co2e_change >= 0 ? "−" : "+"}${number(Math.abs(item.estimated_co2e_change), 3)}</strong> kg CO₂e</span></div></div></article>`).join("") : `<article class="card empty-state">No ${type} opportunities meet the current threshold.</article>`}</div></section>`;
+      <div class="grid two-col">${list.length ? list.map((item) => `<article class="card recommendation-card"><div class="action-symbol ${type === "shift" ? "shift" : ""}">${type === "reduce" ? "↓" : "↗"}</div><div class="recommendation-body"><span class="tag ${type === "shift" ? "shift-tag" : ""}">${type}${type === "shift" && !item.confirmed ? " · likely label" : ""}</span><h3>${esc(item.title)}</h3><p>${esc(item.explanation)}</p><div class="impact-row">${type === "reduce" ? `<span><strong>${number(item.estimated_kwh_change, 2)}</strong> kWh avoided*</span>` : `<span><strong>0</strong> kWh change</span>`}<span><strong>${item.estimated_sek_change >= 0 ? "−" : "+"}${number(Math.abs(item.estimated_sek_change), 2)}</strong> SEK</span><span><strong>${item.estimated_co2e_change >= 0 ? "−" : "+"}${number(Math.abs(item.estimated_co2e_change), 3)}</strong> kg CO₂e</span></div></div></article>`).join("") : `<article class="card empty-state">No ${type} opportunities meet the current threshold.</article>`}</div></section>`;
   }).join("") + `<p class="projection-label">* Reduce opportunity is an estimate, not guaranteed savings. Spot costs exclude network fees, tax and VAT. SHIFT savings compare estimated use at two hours and never count as kWh reduction.</p>`;
 }
 
@@ -226,11 +219,6 @@ function renderQuality() {
   return `<div class="grid quality-grid page-section">${stats.map((item) => `<article class="card quality-stat"><span>${item[0]}</span><strong>${item[1].toLocaleString()}</strong><small>${item[2]}</small></article>`).join("")}</div>
     <article class="card page-section"><div class="section-header"><div><h2>From incoming reading to trusted insight</h2><p>Every CSV row and API reading uses the same normalizer before reaching SQLite. ${quality.supplemental_source_issues} incomplete market/context rows were separately logged and excluded, never replaced with zero.</p></div></div><div class="pipeline">${[["↗", "Incoming", "meter or CSV"],["⌕", "Validated", "clean & classify"],["▤", "SQLite", "persisted record"],["✳", "Analytics", "trusted data only"]].map((step, index) => `${index ? `<span class="pipeline-arrow">→</span>` : ""}<div class="pipeline-step"><div class="pipeline-icon">${step[0]}</div><strong>${step[1]}</strong><small>${step[2]}</small></div>`).join("")}</div></article>
     <article class="card large-card page-section"><h2>Recent ingestion activity</h2><p>Most recent classifications. Repaired values are normalized before they appear in flat analytics.</p><div class="event-list">${quality.recent_events.map((event) => `<div class="event-row"><span class="event-id">${esc(event.reading_id || "missing ID")}</span><span class="status-badge status-${esc(event.status)}">${esc(event.status)}</span><span class="event-note">${esc(event.reason || event.repairs.join(", ") || "No changes required")}</span></div>`).join("") || `<div class="empty-state">No events yet.</div>`}</div></article>`;
-}
-
-function renderWeekly() {
-  const { summary, email_html: emailHtml } = state.summary;
-  return `<div class="grid summary-layout"><div><div class="grid summary-stat-grid page-section">${[["Energy", `${number(summary.energy_kwh, 1)} kWh`],["Spot-energy cost", `${number(summary.spot_cost_sek, 2)} SEK`],["Operational CO₂e", `${number(summary.co2e_kg, 2)} kg`]].map((item) => `<article class="card summary-stat"><span>${item[0]}</span><strong>${item[1]}</strong></article>`).join("")}</div><article class="card large-card"><h2>Projected annual opportunity</h2><p>${esc(summary.annual_projection.label)}</p><div class="grid three-col"><div><span class="appliance-id">KWH REDUCTION</span><div class="appliance-name">${number(summary.annual_projection.kwh, 1)}</div></div><div><span class="appliance-id">SPOT COST</span><div class="appliance-name">${number(summary.annual_projection.sek, 0)} SEK</div></div><div><span class="appliance-id">CO₂e AVOIDED</span><div class="appliance-name">${number(summary.annual_projection.co2e_kg, 1)} kg</div></div></div><p class="projection-label">${esc(summary.cost_note)} ${esc(summary.carbon_note)}</p></article></div><div>${emailHtml}<p class="projection-label">This email preview is rendered from the same API-generated summary object that a future email delivery provider would receive.</p></div></div>`;
 }
 
 function renderDaily() {
@@ -260,7 +248,7 @@ function renderDaily() {
       <div class="section-header"><div><h2>Choose what matters ${note.is_historical_scenario ? "for this modeled day" : "tomorrow"}</h2><p>Each mode is recomputed from hourly market data and this flat's recurring load patterns.</p></div></div>
       <div class="mode-tabs daily-mode-tabs" role="group" aria-label="Daily nudge optimization mode">${["cheapest", "balanced", "greenest"].map((mode) => `<button class="mode-button ${state.dailyMode === mode ? "active" : ""}" data-daily-mode="${mode}">${mode[0].toUpperCase() + mode.slice(1)}</button>`).join("")}</div>
       <div class="daily-window"><span>BEST START WINDOW · ${state.dailyMode.toUpperCase()}</span><strong>${currentMode.window ? `${hourLabel(currentMode.window.hour_local)} Sweden time` : "Unavailable"}</strong><small>${currentMode.window ? `${number(currentMode.window.spot_sek_per_kwh, 3)} SEK/kWh · ${number(currentMode.window.carbon_gco2e_per_kwh, 1)} gCO₂e/kWh` : "No forecast data"}</small></div>
-      <div class="daily-actions">${actions.length ? actions.map((action) => `<article class="daily-action"><div class="daily-action-head"><div><span class="appliance-id">${esc(action.appliance_id)} · ${action.confirmed ? "CONFIRMED" : `${Math.round(action.confidence * 100)}% INFERRED`}</span><h3>Run your ${esc(action.appliance_type.toLowerCase())} around ${hourLabel(action.suggested_hour_local)} local time</h3></div><span class="action-symbol shift">↗</span></div><p>Usual start: ${hourLabel(action.usual_hour_local)} local time · typical run ${number(action.typical_run_kwh, 2)} kWh across ${action.runs_observed} distinct recent runs.</p><div class="impact-row"><span><strong>${action.estimated_sek_change >= 0 ? "−" : "+"}${number(Math.abs(action.estimated_sek_change), 2)}</strong> SEK</span><span><strong>${action.estimated_co2e_change_kg >= 0 ? "−" : "+"}${number(Math.abs(action.estimated_co2e_change_kg), 3)}</strong> kg CO₂e</span><span><strong>0</strong> kWh change</span></div></article>`).join("") : `<div class="empty-state">No recurring dishwasher or washing-machine run has a safe alternative hour that improves this mode. Confirm appliance labels or check again after more readings arrive.</div>`}</div>
+      <div class="daily-actions">${actions.length ? actions.map((action) => `<article class="daily-action"><div class="daily-action-head"><div>      <span class="appliance-id">${esc(action.appliance_id)} · ${action.confirmed ? "CONFIRMED" : `${Math.round(action.confidence * 100)}% LIKELY`}</span><h3>Run the ${action.confirmed ? "" : "likely "}${esc(action.appliance_type.toLowerCase())} load around ${hourLabel(action.suggested_hour_local)} local time</h3></div><span class="action-symbol shift">↗</span></div><p>Usual start: ${hourLabel(action.usual_hour_local)} local time · typical run ${number(action.typical_run_kwh, 2)} kWh across ${action.runs_observed} distinct recent runs.</p><div class="impact-row"><span><strong>${action.estimated_sek_change >= 0 ? "−" : "+"}${number(Math.abs(action.estimated_sek_change), 2)}</strong> SEK</span><span><strong>${action.estimated_co2e_change_kg >= 0 ? "−" : "+"}${number(Math.abs(action.estimated_co2e_change_kg), 3)}</strong> kg CO₂e</span><span><strong>0</strong> kWh change</span></div></article>`).join("") : `<div class="empty-state">No recurring dishwasher or washing-machine run has a safe alternative hour that improves this mode. Confirm appliance labels or check again after more readings arrive.</div>`}</div>
     </section>
   </div>
   <article class="card detailed-market-card page-section">
@@ -278,7 +266,6 @@ function render() {
     circuits: renderAppliances,
     quality: renderQuality,
     daily: renderDaily,
-    weekly: renderWeekly,
   }[state.page]();
   $("#view-container").innerHTML = content;
   $("#view-container").querySelectorAll("[data-go]").forEach((button) => button.addEventListener("click", () => setPage(button.dataset.go)));

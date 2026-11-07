@@ -15,7 +15,6 @@ The dashboard is backed by a real JSON API and SQLite database. It is not a stat
 - Explainable probabilistic appliance labels with student confirmation/correction.
 - Occupancy-based **REDUCE** opportunities grouped by appliance type, with contributing circuit IDs shown. Unknown circuits surface for identification without assumed savings; refrigerators are excluded.
 - Price/carbon-based **SHIFT** windows in cheapest, balanced and greenest modes. A shift always reports `0 kWh` change.
-- A weekly summary and email preview generated from the same API response, plus clearly labeled annualized opportunity projections.
 - A replay button that submits a new reading through the same ingestion function and updates the database-backed dashboard.
 
 The inference is a deterministic, explainable heuristic, not a trained model or LLM. Arithmetic, cleaning and ranking stay in code. The market, meter-replay and notification integrations have provider seams so synthetic implementations can later be replaced.
@@ -79,8 +78,6 @@ The app listens on port `8000`; if that port is in use, set `PORT` to another po
 5. Open **Data quality** to see the raw/valid/repaired/suspicious/rejected counts.
 6. Select **Inject a reading**. The app sends `330 Wh` through ingestion, normalizes it to `0.33 kWh`, persists it and reloads the analytics.
 7. Open **Daily nudge**, choose cheapest/balanced/greenest, and use **Simulate today's push**. The browser requests the daily note from the API and posts the chosen note to the delivery API. The simulated delivery is stored in SQLite and is limited to one per flat per UTC day.
-8. Open **Weekly note** for the generated summary, email preview and explicitly labeled annual opportunity projection.
-
 The market view uses supplied hourly rows when available. For missing hours, the synthetic provider projects from historical weekday/local-hour averages and marks those rows as projected. The supplied market data is historical: when its next modeled date is already in the past, the dashboard clearly labels it a historical scenario rather than tomorrow's forecast. All displayed hours and dates are Sweden-local; UTC timestamps remain available in API results.
 
 ## API
@@ -97,7 +94,6 @@ All responses are JSON except the dashboard assets. Start the server before call
 | `PATCH` | `/api/flats/{flat_id}/appliances/{appliance_id}` | Confirm or clear `confirmed_type` |
 | `GET` | `/api/flats/{flat_id}/recommendations?mode=balanced` | Ranked REDUCE and SHIFT advice |
 | `POST` | `/api/flats/{flat_id}/recommendations/generate` | Recalculate recommendations |
-| `GET` | `/api/flats/{flat_id}/weekly-summary` | Summary facts and matching email HTML preview |
 | `GET` | `/api/flats/{flat_id}/daily-note?mode=balanced` | Generate a timing note from recent recurring device usage and the next modeled market day |
 | `POST` | `/api/flats/{flat_id}/daily-notification` | Simulate delivery of today's nudge, persisted once per flat per UTC day |
 | `GET` | `/api/market/tomorrow?flat_id=F001&mode=cheapest` | Hourly price/carbon data and suggested window |
@@ -135,7 +131,7 @@ curl -X POST http://localhost:8000/api/flats/F001/daily-notification \
   -d '{"mode":"balanced"}'
 ```
 
-The preview endpoint derives device-specific advice from trusted, recent recurring dishwasher/washing-machine runs and the hourly market data. It returns usual and suggested Sweden-local start hours, corresponding UTC hours, estimated SEK/CO₂e differences, run counts, and zero kWh change for shifting. A suggested time must be within six hours of the usual start, between 06:00 and 23:00 local time, and improve the selected mode by at least 0.05 on its normalized score, filtering out marginal timing noise. Each note also gives the cheapest, cleanest, and balanced market hour; the 24-hour chart uses the same API values. The send endpoint uses the `NotificationProvider` simulation and persists delivery status; it is a backend API action, not an operating-system push or a scheduled production service. The provided CSVs are synthetic hackathon data; values and recommendations are calculated dynamically from the database, not hard-coded dashboard fixtures. Historical projections are not live market forecasts.
+The preview endpoint derives device-specific advice from trusted, recent recurring dishwasher/washing-machine runs and the hourly market data. It selects at most one candidate circuit per appliance type, preferring confirmed labels, then stronger inference confidence and repeated-run evidence; unconfirmed device labels are marked “likely.” It returns usual and suggested Sweden-local start hours, corresponding UTC hours, estimated SEK/CO₂e differences, run counts, and zero kWh change for shifting. A suggested time must be within six hours of the usual start, between 06:00 and 23:00 local time, and improve the selected mode by at least 0.05 on its normalized score, filtering out marginal timing noise. Each note also gives the cheapest, cleanest, and balanced market hour; the 24-hour chart uses the same API values. The send endpoint uses the `NotificationProvider` simulation and persists delivery status; it is a backend API action, not an operating-system push or a scheduled production service. The provided CSVs are synthetic hackathon data; values and recommendations are calculated dynamically from the database, not hard-coded dashboard fixtures. Historical projections are not live market forecasts.
 
 ## Calculation notes and limitations
 
@@ -143,7 +139,7 @@ The preview endpoint derives device-specific advice from trusted, recent recurri
 - Spot cost is `kWh × spot_sek_per_kwh`; it excludes retail markup, network fees, tax, VAT and fixed charges. Negative market prices are preserved.
 - Operational emissions are `kWh × carbon_gco2e_per_kwh / 1000`, using the supplied synthetic factors.
 - **REDUCE** groups matching inferred/confirmed appliance types and lists their circuit IDs. Away-time advice excludes refrigerators. Portable heaters and other identified loads can be considered; an unknown circuit is surfaced for identification only, with no assumed avoidable energy or savings. For identified types, the estimate assumes half of observed use is avoidable.
-- **SHIFT** detects short contiguous high-energy runs repeated across distinct days, averages their local start hour circularly, then compares it with a mode-selected hour within the feasible window. Suspicious readings are excluded. It changes estimated price/emissions, never kWh. Scheduling safety and actual flexibility are not known.
+- **SHIFT** detects short contiguous high-energy runs repeated across distinct days, selects one strongest circuit pattern per appliance type, averages its local start hour circularly, then compares it with a mode-selected hour within the feasible window. Inferred labels are shown as likely, not confirmed. Suspicious readings are excluded. It changes estimated price/emissions, never kWh. Scheduling safety and actual flexibility are not known.
 - Balanced mode equally weights normalized price and carbon scores. Cheapest and greenest optimize only the respective supplied metric.
 - Appliance labels are probabilistic usage-pattern heuristics. Hourly data cannot reliably identify every appliance, so labels should be checked and corrected by the student.
 - Annual projections extrapolate the current seven-day opportunity by `365 / observed days`. One synthetic autumn week is not evidence of annual savings; seasonality, rebound and behavior changes are not modeled.
@@ -151,7 +147,7 @@ The preview endpoint derives device-specific advice from trusted, recent recurri
 
 ## MVP and stretch scope
 
-**Essential functional MVP:** SQL persistence, CSV import through the ingestion layer, validation/cleaning, REST ingestion, per-flat analytics, REDUCE/SHIFT calculations, recommendations, a connected dashboard and generated weekly summaries.
+**Essential functional MVP:** SQL persistence, CSV import through the ingestion layer, validation/cleaning, REST ingestion, per-flat analytics, REDUCE/SHIFT calculations, recommendations and a connected dashboard.
 
 **High-value demo enhancements:** appliance inference and correction, three optimization modes, projected next-day market windows, quality dashboard, real ingestion replay, shared email preview and API-backed daily notification simulation.
 

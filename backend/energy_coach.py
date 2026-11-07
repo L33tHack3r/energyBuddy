@@ -72,6 +72,15 @@ def _round_nonzero(value, digits):
     return rounded if rounded else 0
 
 
+def _appliance_pattern_strength(appliance):
+    return (
+        bool(appliance.get("confirmed_type") or appliance.get("confirmed")),
+        appliance.get("inference_confidence", appliance.get("confidence", 0)),
+        appliance.get("runs_observed", 0),
+        appliance.get("typical_run_kwh", appliance.get("typical_kwh", 0)),
+    )
+
+
 @contextmanager
 def connect():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -964,8 +973,8 @@ def _recommendations(connection, flat_id, mode="balanced"):
             if baseline["hour"] == destination["hour"] or (cost_change <= 0.01 and carbon_change <= 0.001):
                 continue
             name = appliance["confirmed_type"] or appliance["inferred_type"]
-            recommendations.append(
-                {
+            inferred = not bool(appliance["confirmed_type"])
+            recommendations.append({
                     "id": f"shift-{appliance_id}-{mode}",
                     "type": "shift",
                     "mode": mode,
@@ -973,8 +982,14 @@ def _recommendations(connection, flat_id, mode="balanced"):
                     "appliance_type": name,
                     "confirmed": bool(appliance["confirmed_type"]),
                     "confidence": round(appliance["inference_confidence"], 2),
-                    "title": f"Try {name.lower()} at a better time",
-                    "explanation": f"Your readings show {len(runs)} short, recurring run(s) averaging {typical_kwh:.2f} kWh starting around {typical_hour:02d}:00 local time. The {mode} synthetic scenario suggests {destination['hour']:02d}:00 Sweden time, within a six-hour shift window. Shifting does not reduce energy use.",
+                    "title": f"Try {'likely ' if inferred else ''}{name.lower()} at a better time",
+                    "explanation": (
+                        f"Circuit {appliance_id} has a {'likely, unconfirmed ' if inferred else ''}"
+                        f"{name.lower()} pattern: {len(runs)} recurring runs averaging {typical_kwh:.2f} kWh "
+                        f"starting around {typical_hour:02d}:00 local time. The {mode} synthetic scenario "
+                        f"suggests {destination['hour']:02d}:00 Sweden time, within a six-hour shift window. "
+                        "Shifting does not reduce energy use."
+                    ),
                     "typical_kwh": round(typical_kwh, 3),
                     "usual_hour": typical_hour,
                     "usual_hour_local": typical_hour,
@@ -987,15 +1002,29 @@ def _recommendations(connection, flat_id, mode="balanced"):
                     "estimated_sek_change": _round_nonzero(cost_change, 2),
                     "estimated_co2e_change": _round_nonzero(carbon_change, 3),
                     "assumption": "A similar load can be safely scheduled at the suggested time.",
-                }
-            )
+                })
     for recommendation in recommendations:
         recommendation["rank_score"] = (
             max(0, recommendation["estimated_sek_change"]) * 0.4
             + recommendation["estimated_kwh_change"] * 0.35
             + max(0, recommendation["estimated_co2e_change"]) * 0.25
         ) * recommendation["confidence"]
-    return sorted(recommendations, key=lambda item: item["rank_score"], reverse=True)
+    ranked = sorted(recommendations, key=lambda item: item["rank_score"], reverse=True)
+    best_shift_by_type = {}
+    non_shift = []
+    for recommendation in ranked:
+        if recommendation["type"] != "shift":
+            non_shift.append(recommendation)
+            continue
+        appliance_type = recommendation["appliance_type"].lower()
+        current = best_shift_by_type.get(appliance_type)
+        if current is None or _appliance_pattern_strength(recommendation) > _appliance_pattern_strength(current):
+            best_shift_by_type[appliance_type] = recommendation
+    return sorted(
+        non_shift + list(best_shift_by_type.values()),
+        key=lambda item: item["rank_score"],
+        reverse=True,
+    )
 
 
 def recommendations(connection, flat_id, mode="balanced"):
@@ -1114,6 +1143,14 @@ def generate_daily_note(connection, flat_id, mode="balanced"):
             "runs_observed": len(runs),
         }
 
+    best_pattern_by_type = {}
+    for pattern in patterns.values():
+        appliance_type = pattern["effective_type"].lower()
+        current = best_pattern_by_type.get(appliance_type)
+        if current is None or _appliance_pattern_strength(pattern) > _appliance_pattern_strength(current):
+            best_pattern_by_type[appliance_type] = pattern
+    patterns = best_pattern_by_type
+
     mode_details = {}
     for choice, forecast in markets.items():
         actions = []
@@ -1144,6 +1181,7 @@ def generate_daily_note(connection, flat_id, mode="balanced"):
                     "confirmed": bool(appliance["confirmed_type"]),
                     "confidence": appliance["inference_confidence"],
                     "runs_observed": appliance["runs_observed"],
+                    "likely": not bool(appliance["confirmed_type"]),
                     "usual_hour_local": appliance["usual_hour"],
                     "suggested_hour_local": suggested["hour_local"],
                     "usual_hour_utc": usual["hour_utc"],
@@ -1200,9 +1238,12 @@ def generate_daily_note(connection, flat_id, mode="balanced"):
     )
     if selected["actions"]:
         first = selected["actions"][0]
-        appliance_name = first["appliance_type"].lower()
+        appliance_name = (
+            f"likely {first['appliance_type'].lower()}"
+            if first["likely"] else first["appliance_type"].lower()
+        )
         device_advice = (
-            f"{day_phrase} ({date_label}), try your {appliance_name} around "
+            f"{day_phrase} ({date_label}), try the {appliance_name} load around "
             f"{first['suggested_hour_local']:02d}:00 Sweden time instead of its usual "
             f"{first['usual_hour_local']:02d}:00 start. Estimated change for a typical "
             f"{first['typical_run_kwh']:.2f} kWh run: "

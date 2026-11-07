@@ -1,0 +1,9 @@
+flat_id,residents,floor_area_m2,price_area,main_heating,tariff_id
+F001,2,56,SE3,district_heat_excluded,T01
+F002,3,69,SE3,district_heat_excluded,T01
+F003,4,82,SE3,district_heat_excluded,T01
+F004,2,56,SE3,district_heat_excluded,T01
+F005,5,95,SE3,district_heat_excluded,T01
+F006,3,69,SE3,district_heat_excluded,T01
+F007,4,82,SE3,district_heat_excluded,T01
+F008,2,56,SE3,district_heat_excluded,T01

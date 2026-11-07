@@ -124,6 +124,10 @@ class EnergyCoachTests(unittest.TestCase):
             actions = coach.recommendations(connection, "F001")
         shifts = [item for item in actions if item["type"] == "shift"]
         self.assertTrue(shifts)
+        self.assertEqual(
+            len(shifts),
+            len({item["appliance_type"].lower() for item in shifts}),
+        )
         with coach.connect() as connection:
             for item in shifts:
                 self.assertEqual(item["estimated_kwh_change"], 0)
@@ -221,11 +225,16 @@ class EnergyCoachTests(unittest.TestCase):
             for label in ("cheapest at", "cleanest at", "best balance at"):
                 self.assertIn(label, note["message"])
             for mode in note["options"].values():
+                self.assertEqual(
+                    len(mode["actions"]),
+                    len({action["appliance_type"].lower() for action in mode["actions"]}),
+                )
                 for action in mode["actions"]:
                     self.assertEqual(action["energy_change_kwh"], 0)
                     self.assertIn(action["suggested_hour_utc"], range(24))
                     self.assertIn(action["suggested_hour_local"], range(6, 24))
                     self.assertGreaterEqual(action["runs_observed"], 2)
+                    self.assertEqual(action["likely"], not action["confirmed"])
                     forecast = coach.market_data(connection, "F001", mode["mode"])
                     hours = {hour["hour_local"]: hour for hour in forecast["hours"]}
                     self.assertGreaterEqual(
